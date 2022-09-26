@@ -1,0 +1,87 @@
+--- 
+jobs: 
+  lint-docker: 
+    machine: 
+      docker_layer_caching: true
+      image: "ubuntu-2004:current"
+      resource_class: medium
+    steps: 
+      - 
+        checkout: 
+          path: ~/app
+      -
+        run:
+          command: |
+            sudo wget -O /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v<< pipeline.parameters.hadolint_version >>/hadolint-Linux-x86_64
+            sudo chmod +x /usr/local/bin/hadolint
+          name: Install Dependencies
+      -
+        run:
+          command: |
+            cd ~/app/docker
+            /usr/local/bin/hadolint --ignore DL3018 --ignore SC2086 --ignore SC3045 --ignore SC2211 Dockerfile
+          name: Lint Dockerfile
+  build-docker: 
+    machine: 
+      docker_layer_caching: false
+      image: "ubuntu-2004:current"
+      resource_class: large
+    steps: 
+      - 
+        checkout: 
+          path: ~/app
+      -
+        run:
+          command: |
+            sudo apt-get update
+            sudo apt-get -y install binfmt-support qemu-user-static
+          name: Install Dependencies
+      - 
+        run: 
+          command: "echo \"$GITHUB_TOKEN\" | docker login --username \"ILoveYaToo\" --password-stdin ghcr.io\n"
+          name: "Login to Docker Repo"
+      - 
+        run: 
+          command: |
+            export BUILDKIT_PROGRESS=plain
+            cd docker
+            export LATEST_VERSION=$(curl -s -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/grocy/grocy/releases | jq -r '.[] | select(.prerelease==false) | .tag_name' | sort -V | tail -n1 | cut -d "v" -f 2)
+            export GITHUB_API_TOKEN=$(curl -u ILoveYaToo:$GITHUB_TOKEN https://ghcr.io/token\?scope\="repository:<repository/path>:pull" | jq -r .token)
+            if [ $(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GITHUB_API_TOKEN" https://ghcr.io/v2/iloveyatoo/freshrss/manifests/$LATEST_VERSION-<< pipeline.parameters.revision >>) == "404" ]
+            then
+              docker buildx create --use
+              docker buildx build --no-cache --push -t ghcr.io/iloveyatoo/freshrss:latest -t ghcr.io/iloveyatoo/grocy:$LATEST_VERSION-<< pipeline.parameters.revision >> --build-arg APP_VER=$LATEST_VERSION --platform linux/arm64,linux/amd64,linux/386 .
+            else
+              echo "Docker Image exists, upload is not required"
+            fi
+          name: "Build Docker Image"
+      - save_cache:
+          key: docker-{{ .Revision }}
+          paths:
+            - ~/app/docker
+    working_directory: ~/app
+version: 2.1
+parameters:
+  revision:
+    type: integer
+    default: 1
+  helm_version:
+    type: string
+    default: "3.9.0"
+  hadolint_version:
+    type: string
+    default: "2.10.0"
+workflows: 
+  default: 
+    jobs: 
+      - lint-docker
+      - lint-helm
+      - build-docker:
+          filters:
+            branches:
+              only: main
+          context: 
+            - github
+            - bunny-storage-helm
+          requires:
+            - lint-docker
