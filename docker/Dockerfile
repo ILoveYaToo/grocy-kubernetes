@@ -2,7 +2,7 @@ FROM --platform=$BUILDPLATFORM php:8.1.8-fpm-alpine as build-extensions
 ARG TARGETARCH
 RUN apk add --no-cache bash
 SHELL ["/bin/bash", "-c"]
-RUN apk add --no-cache gd gd-dev libxml2 libxml2-dev sqlite-libs \
+RUN apk add --no-cache gd gd-dev libxml2 libxml2-dev sqlite-libs icu icu-dev \
     && if [[ "$TARGETARCH" = "arm64" ]]; then \
            docker-php-ext-configure gd --build x86_64-pc-linux-musl --host aarch64-linux-musl; \
            docker-php-ext-configure simplexml --build x86_64-pc-linux-musl --host aarch64-linux-musl; \
@@ -25,7 +25,7 @@ RUN apk add --no-cache gd gd-dev libxml2 libxml2-dev sqlite-libs \
 	         docker-php-ext-install -j"$(nproc)" opcache gd simplexml intl pdo pdo_sqlite mbstring; \
 	         docker-php-ext-enable opcache gd simplexml intl pdo pdo_sqlite mbstring; \
        fi \
-    && apk add --no-cache gd libxml2 sqlite-libs
+    && apk add --no-cache gd libxml2 sqlite-libs icu
 
 FROM php:8.1.8-fpm-alpine as build-pecl
 RUN apk add --update --no-cache --virtual .build-dependencies $PHPIZE_DEPS \ 
